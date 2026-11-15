@@ -67,7 +67,7 @@ CREATE TABLE zamaraeva_food.client (
 -- 2.2. Адреса
 CREATE TABLE zamaraeva_food.address (
     address_id UUID PRIMARY KEY DEFAULT exts.uuid_generate_v4(),
-    street VARCHAR(150) NOT NULL,
+    street VARCHAR(100) NOT NULL,
     house_number VARCHAR(20) NOT NULL,
     apartment_office VARCHAR(20)
 );
@@ -80,7 +80,7 @@ CREATE TABLE zamaraeva_food.client_address (
 -- 2.4. Рестораны
 CREATE TABLE zamaraeva_food.restaurant (
     restaurant_id UUID PRIMARY KEY DEFAULT exts.uuid_generate_v4(),
-    restaurant_name VARCHAR(150) NOT NULL,
+    restaurant_name VARCHAR(100) NOT NULL,
     address_id UUID NOT NULL UNIQUE REFERENCES zamaraeva_food.address(address_id),
     description TEXT NOT NULL,
     work_start TIME NOT NULL,
