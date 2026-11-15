@@ -25,3 +25,8 @@ GRANT USAGE ON SCHEMA information_schema TO inspector;
 GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO inspector;
 GRANT USAGE ON SCHEMA pg_catalog TO inspector;
 GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO inspector;
+
+-- Запрет на смену пароля пользователя
+REVOKE UPDATE ON zamaraeva_food.client FROM PUBLIC;
+-- Разрешаем обновлять только логин и телефон, но не пароль
+GRANT UPDATE (login, phone_number) ON zamaraeva_food.client TO inspector;
