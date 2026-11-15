@@ -24,20 +24,31 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     v_alphabet CONSTANT TEXT := 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя';
-    v_client_ids UUID[];
-    v_address_ids UUID[];
-    v_rest_ids UUID[];
-    v_courier_ids UUID[];
-    v_cat_ids UUID[];
-    v_product_ids UUID[];
-    v_prices NUMERIC[];
+    v_alpha_len CONSTANT INTEGER := LENGTH(v_alphabet);
+
+    v_rest_statuses CONSTANT zamaraeva_food.restaurant_status[] := ENUM_RANGE(NULL::zamaraeva_food.restaurant_status);
+    v_prod_statuses CONSTANT zamaraeva_food.product_status[] := ENUM_RANGE(NULL::zamaraeva_food.product_status);
+    v_cour_statuses CONSTANT zamaraeva_food.courier_status[] := ENUM_RANGE(NULL::zamaraeva_food.courier_status);
+    v_ord_statuses  CONSTANT zamaraeva_food.order_status[] := ENUM_RANGE(NULL::zamaraeva_food.order_status);
+    v_pay_types     CONSTANT zamaraeva_food.payment_type[] := ENUM_RANGE(NULL::zamaraeva_food.payment_type);
+    v_rev_types     CONSTANT zamaraeva_food.review_entity_type[] := ENUM_RANGE(NULL::zamaraeva_food.review_entity_type);
+
+    v_client_ids UUID[] := '{}';
+    v_address_ids UUID[] := '{}';
+    v_rest_ids UUID[] := '{}';
+    v_courier_ids UUID[] := '{}';
+    v_cat_ids UUID[] := '{}';
+    v_product_ids UUID[] := '{}';
+    v_prices NUMERIC[] := '{}';
     v_rest_prods UUID[];
     v_rest_prices NUMERIC[];
     v_qtys INTEGER[];
     v_selected INTEGER[];
+
     v_id UUID;
     v_order_id UUID;
     v_entity_id UUID;
+    v_rand_str TEXT;
     v_price NUMERIC(12, 2);
     v_order_amount NUMERIC(12, 2);
     v_commission NUMERIC(12, 2);
@@ -71,12 +82,11 @@ BEGIN
         RAISE EXCEPTION 'value должен быть положительным';
     END IF;
 
-	FOR i IN 1..value LOOP
+    -- 1. Курьеры, клиенты, категории продуктов
+    FOR i IN 1..value LOOP
         v_status_courier := CASE
             WHEN RANDOM() < 0.2 THEN 'уволен'::zamaraeva_food.courier_status
-            ELSE (ENUM_RANGE(NULL::zamaraeva_food.courier_status))[
-                1 + FLOOR(RANDOM() * CARDINALITY(ENUM_RANGE(NULL::zamaraeva_food.courier_status)))::INT
-            ]
+            ELSE v_cour_statuses[1 + FLOOR(RANDOM() * ARRAY_LENGTH(v_cour_statuses, 1))::INT]
         END;
         v_hire_date := CURRENT_DATE - (RANDOM() * 180)::INT;
         IF v_status_courier = 'уволен' THEN
@@ -85,13 +95,15 @@ BEGIN
             v_dismiss_date := NULL;
         END IF;
 
+        v_rand_str := ARRAY_TO_STRING(ARRAY(
+            SELECT SUBSTRING(v_alphabet, 1 + FLOOR(RANDOM() * v_alpha_len)::INT, 1)
+            FROM GENERATE_SERIES(1, 6 + FLOOR(RANDOM() * 12)::INT + i * 0)
+        ), '');
+
         INSERT INTO zamaraeva_food.courier (
             fio, phone_number, status, hire_date, dismissal_date, coefficient
         ) VALUES (
-            REPEAT(
-                SUBSTRING(v_alphabet, 1, 1 + FLOOR(RANDOM() * LENGTH(v_alphabet))::INT),
-                1 + FLOOR(RANDOM() * 3)::INT
-            ),
+            v_rand_str,
             '7' || LPAD(FLOOR(RANDOM() * 10000000000)::BIGINT::TEXT, 10, '0'),
             v_status_courier,
             v_hire_date,
@@ -100,28 +112,27 @@ BEGIN
         ) RETURNING courier_id INTO v_id;
         v_courier_ids := ARRAY_APPEND(v_courier_ids, v_id);
 
+        v_rand_str := ARRAY_TO_STRING(ARRAY(
+            SELECT SUBSTRING(v_alphabet, 1 + FLOOR(RANDOM() * v_alpha_len)::INT, 1)
+            FROM GENERATE_SERIES(1, 5 + FLOOR(RANDOM() * 8)::INT + i * 0)
+        ), '');
+
         INSERT INTO zamaraeva_food.client (login, password, phone_number)
         VALUES (
-            SUBSTRING(
-                REPEAT(
-                    SUBSTRING(v_alphabet, 1, 1 + FLOOR(RANDOM() * LENGTH(v_alphabet))::INT),
-                    1 + FLOOR(RANDOM() * 2)::INT
-                ) || MD5(RANDOM()::TEXT),
-                1,
-                100
-            ),
+            SUBSTRING(v_rand_str || '_' || MD5(RANDOM()::TEXT), 1, 100),
             MD5(RANDOM()::TEXT),
             '7' || LPAD(FLOOR(RANDOM() * 10000000000)::BIGINT::TEXT, 10, '0')
         ) RETURNING client_id INTO v_id;
         v_client_ids := ARRAY_APPEND(v_client_ids, v_id);
 
+        v_rand_str := ARRAY_TO_STRING(ARRAY(
+            SELECT SUBSTRING(v_alphabet, 1 + FLOOR(RANDOM() * v_alpha_len)::INT, 1)
+            FROM GENERATE_SERIES(1, 5 + FLOOR(RANDOM() * 10)::INT + i * 0)
+        ), '');
+
         INSERT INTO zamaraeva_food.product_category (product_category_name)
-        VALUES (
-            REPEAT(
-                SUBSTRING(v_alphabet, 1, 1 + FLOOR(RANDOM() * LENGTH(v_alphabet))::INT),
-                1 + FLOOR(RANDOM() * 3)::INT
-            )
-        ) RETURNING product_category_id INTO v_id;
+        VALUES (v_rand_str)
+        RETURNING product_category_id INTO v_id;
         v_cat_ids := ARRAY_APPEND(v_cat_ids, v_id);
     END LOOP;
 
@@ -133,13 +144,16 @@ BEGIN
         WHERE courier_id = v_courier_ids[1];
     END IF;
 
+    -- 2. Адреса
     FOR i IN 1..value * 5 LOOP
+        v_rand_str := ARRAY_TO_STRING(ARRAY(
+            SELECT SUBSTRING(v_alphabet, 1 + FLOOR(RANDOM() * v_alpha_len)::INT, 1)
+            FROM GENERATE_SERIES(1, 6 + FLOOR(RANDOM() * 10)::INT + i * 0)
+        ), '');
+
         INSERT INTO zamaraeva_food.address (street, house_number, apartment_office)
         VALUES (
-            REPEAT(
-                SUBSTRING(v_alphabet, 1, 1 + FLOOR(RANDOM() * LENGTH(v_alphabet))::INT),
-                1 + FLOOR(RANDOM() * 3)::INT
-            ),
+            v_rand_str,
             (1 + FLOOR(RANDOM() * 200)::INT)::TEXT,
             CASE
                 WHEN RANDOM() < 0.3 THEN NULL
@@ -149,47 +163,53 @@ BEGIN
         v_address_ids := ARRAY_APPEND(v_address_ids, v_id);
     END LOOP;
 
+    -- 3. Рестораны
     FOR i IN 1..value LOOP
         v_work_start := TIME '08:00' + FLOOR(RANDOM() * 6)::INT * INTERVAL '1 hour';
         v_work_end := v_work_start + (4 + FLOOR(RANDOM() * 6)::INT) * INTERVAL '1 hour';
+
+        v_rand_str := ARRAY_TO_STRING(ARRAY(
+            SELECT SUBSTRING(v_alphabet, 1 + FLOOR(RANDOM() * v_alpha_len)::INT, 1)
+            FROM GENERATE_SERIES(1, 6 + FLOOR(RANDOM() * 12)::INT + i * 0)
+        ), '');
 
         INSERT INTO zamaraeva_food.restaurant (
             restaurant_name, address_id, description, work_start, work_end,
             company_details, status
         ) VALUES (
-            REPEAT(
-                SUBSTRING(v_alphabet, 1, 1 + FLOOR(RANDOM() * LENGTH(v_alphabet))::INT),
-                1 + FLOOR(RANDOM() * 3)::INT
-            ),
+            v_rand_str,
             v_address_ids[i],
             SUBSTRING(MD5(RANDOM()::TEXT), 1, 1 + FLOOR(RANDOM() * 31)::INT),
             v_work_start,
             v_work_end,
             SUBSTRING(MD5(RANDOM()::TEXT), 1, 1 + FLOOR(RANDOM() * 31)::INT),
-            (ENUM_RANGE(NULL::zamaraeva_food.restaurant_status))[
-                1 + FLOOR(RANDOM() * CARDINALITY(ENUM_RANGE(NULL::zamaraeva_food.restaurant_status)))::INT
-            ]
+            v_rest_statuses[1 + FLOOR(RANDOM() * ARRAY_LENGTH(v_rest_statuses, 1))::INT]
         ) RETURNING restaurant_id INTO v_id;
         v_rest_ids := ARRAY_APPEND(v_rest_ids, v_id);
     END LOOP;
 
+    -- 4. Адреса клиентов
     FOR i IN 1..value * 4 LOOP
         j := ((i - 1) / 4) + 1;
         INSERT INTO zamaraeva_food.client_address (client_id, address_id)
         VALUES (v_client_ids[j], v_address_ids[value + i]);
     END LOOP;
 
+    -- 5. Блюда
     FOR i IN 1..value * 5 LOOP
         j := ((i - 1) % value) + 1;
         v_price := 1000 + FLOOR(RANDOM() * 4000)::INT;
+
+        v_rand_str := ARRAY_TO_STRING(ARRAY(
+            SELECT SUBSTRING(v_alphabet, 1 + FLOOR(RANDOM() * v_alpha_len)::INT, 1)
+            FROM GENERATE_SERIES(1, 5 + FLOOR(RANDOM() * 12)::INT + i * 0)
+        ), '');
+
         INSERT INTO zamaraeva_food.product (
             product_name, product_category_id, price, restaurant_id,
             photo_url, status, description
         ) VALUES (
-            REPEAT(
-                SUBSTRING(v_alphabet, 1, 1 + FLOOR(RANDOM() * LENGTH(v_alphabet))::INT),
-                1 + FLOOR(RANDOM() * 3)::INT
-            ),
+            v_rand_str,
             v_cat_ids[1 + FLOOR(RANDOM() * value)::INT],
             v_price,
             v_rest_ids[j],
@@ -197,15 +217,14 @@ BEGIN
                 WHEN RANDOM() < 0.5 THEN NULL
                 ELSE 'https://cdn.foodexpress.ru/img/' || MD5(RANDOM()::TEXT) || '.jpg'
             END,
-            (ENUM_RANGE(NULL::zamaraeva_food.product_status))[
-                1 + FLOOR(RANDOM() * CARDINALITY(ENUM_RANGE(NULL::zamaraeva_food.product_status)))::INT
-            ],
+            v_prod_statuses[1 + FLOOR(RANDOM() * ARRAY_LENGTH(v_prod_statuses, 1))::INT],
             SUBSTRING(MD5(RANDOM()::TEXT), 1, 1 + FLOOR(RANDOM() * 31)::INT)
         ) RETURNING product_id INTO v_id;
         v_product_ids := ARRAY_APPEND(v_product_ids, v_id);
         v_prices := ARRAY_APPEND(v_prices, v_price);
     END LOOP;
 
+    -- 6. Заказы, состав заказов, оплаты и отзывы
     FOR i IN 1..value * 5 LOOP
         j := ((i - 1) % value) + 1;
         v_client_idx := 1 + FLOOR(RANDOM() * value)::INT;
@@ -250,15 +269,10 @@ BEGIN
             v_order_ts := LOCALTIMESTAMP - INTERVAL '3 hours';
         END IF;
 
-        v_status_order := (ENUM_RANGE(NULL::zamaraeva_food.order_status))[
-            1 + FLOOR(RANDOM() * CARDINALITY(ENUM_RANGE(NULL::zamaraeva_food.order_status)))::INT
-        ];
-        v_pay_type := (ENUM_RANGE(NULL::zamaraeva_food.payment_type))[
-            1 + FLOOR(RANDOM() * CARDINALITY(ENUM_RANGE(NULL::zamaraeva_food.payment_type)))::INT
-        ];
-        v_entity_type := (ENUM_RANGE(NULL::zamaraeva_food.review_entity_type))[
-            1 + FLOOR(RANDOM() * CARDINALITY(ENUM_RANGE(NULL::zamaraeva_food.review_entity_type)))::INT
-        ];
+        v_status_order := v_ord_statuses[1 + FLOOR(RANDOM() * ARRAY_LENGTH(v_ord_statuses, 1))::INT];
+        v_pay_type := v_pay_types[1 + FLOOR(RANDOM() * ARRAY_LENGTH(v_pay_types, 1))::INT];
+        v_entity_type := v_rev_types[1 + FLOOR(RANDOM() * ARRAY_LENGTH(v_rev_types, 1))::INT];
+
         IF v_status_order = 'доставлен' THEN
             v_deliv_ts := v_order_ts + INTERVAL '1 hour';
         ELSE
@@ -325,6 +339,7 @@ BEGIN
         );
     END LOOP;
 
+    -- 7. Пересчёт рейтингов
     UPDATE zamaraeva_food.product p
     SET rating = (
         SELECT ROUND(AVG(r.rating), 2)
@@ -341,6 +356,7 @@ BEGIN
           AND r.entity_id = t.restaurant_id
     );
 
+    -- 8. Расчёт выплат курьерам за последние 6 месяцев
     FOR j IN 1..value LOOP
         SELECT status INTO v_status_courier
         FROM zamaraeva_food.courier
@@ -370,7 +386,10 @@ BEGIN
                 v_courier_ids[j],
                 ROUND(v_curr_coeff * v_comm_sum, 2),
                 v_curr_coeff
-            );
+            )
+            ON CONFLICT (year, month, courier_id)
+            DO UPDATE SET amount = EXCLUDED.amount,
+                          coefficient_used = EXCLUDED.coefficient_used;
 
             v_next_coeff := CASE
                 WHEN v_deliv_count <= 150 THEN 0.1
