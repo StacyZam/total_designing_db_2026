@@ -66,6 +66,8 @@ DECLARE
     v_work_end TIME;
     v_status_courier zamaraeva_food.courier_status;
     v_status_order zamaraeva_food.order_status;
+	v_order_pay_status zamaraeva_food.order_pay_status;
+	v_pay_status zamaraeva_food.payment_status;
     v_pay_type zamaraeva_food.payment_type;
     v_entity_type zamaraeva_food.review_entity_type;
     v_deliv_count INTEGER;
@@ -279,6 +281,17 @@ BEGIN
             v_deliv_ts := NULL;
         END IF;
 
+        IF v_status_order IN ('готовится', 'в_доставке', 'доставлен') OR RANDOM() < 0.6 THEN
+            v_order_pay_status := 'оплачен';
+            v_pay_status       := 'успех';
+        ELSIF RANDOM() < 0.5 THEN
+            v_order_pay_status := 'ошибка';
+            v_pay_status       := 'ошибка';
+        ELSE
+            v_order_pay_status := 'ожидает';
+            v_pay_status       := 'в_обработке';
+        END IF;
+
         INSERT INTO zamaraeva_food."order" (
             courier_id, client_id, address_id, restaurant_id,
             order_timestamp, delivery_timestamp, order_amount,
@@ -294,7 +307,7 @@ BEGIN
             v_commission,
             v_total_amount,
             v_status_order,
-            'оплачен',
+            v_order_pay_status,
             SUBSTRING(MD5(RANDOM()::TEXT), 1, 1 + FLOOR(RANDOM() * 31)::INT)
         ) RETURNING order_id INTO v_order_id;
 
@@ -302,6 +315,20 @@ BEGIN
             INSERT INTO zamaraeva_food.order_structure (order_id, product_id, quantity)
             VALUES (v_order_id, v_rest_prods[v_selected[k]], v_qtys[k]);
         END LOOP;
+
+        IF v_pay_status = 'успех' AND RANDOM() < 0.3 THEN
+            INSERT INTO zamaraeva_food.payment (
+                order_id, payment_type, amount, transaction_id,
+                payment_timestamp, status
+            ) VALUES (
+                v_order_id,
+                v_pay_type,
+                v_total_amount,
+                exts.uuid_generate_v4(),
+                v_order_ts + INTERVAL '5 minutes',
+                'ошибка'
+            );
+        END IF;
 
         INSERT INTO zamaraeva_food.payment (
             order_id, payment_type, amount, transaction_id,
@@ -312,7 +339,7 @@ BEGIN
             v_total_amount,
             exts.uuid_generate_v4(),
             v_order_ts + INTERVAL '30 minutes',
-            'успех'
+            v_pay_status
         );
 
         v_entity_id := CASE v_entity_type
@@ -407,5 +434,37 @@ BEGIN
         SET coefficient = v_curr_coeff
         WHERE courier_id = v_courier_ids[j];
     END LOOP;
+END;
+$$;
+
+-- Процедура для смены пароля клиента
+CREATE OR REPLACE PROCEDURE zamaraeva_food.change_client_password(
+    p_client_id    UUID,
+    p_old_password VARCHAR(32),
+    p_new_password VARCHAR(32)
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF p_new_password IS NULL OR LENGTH(BTRIM(p_new_password)) = 0 THEN
+        RAISE EXCEPTION 'Новый пароль не может быть пустым';
+    END IF;
+
+    -- Проверяем, что клиент существует и старый пароль совпадает
+    IF NOT EXISTS (
+        SELECT 1
+        FROM zamaraeva_food.client
+        WHERE client_id = p_client_id
+          AND password = p_old_password
+    ) THEN
+        RAISE EXCEPTION 'Неверный текущий пароль или пользователь не найден';
+    END IF;
+
+    -- Разрешаем смену пароля строго в рамках текущей транзакции
+    SET LOCAL app.allow_password_change = 'true';
+
+    UPDATE zamaraeva_food.client
+       SET password = p_new_password
+     WHERE client_id = p_client_id;
 END;
 $$;
