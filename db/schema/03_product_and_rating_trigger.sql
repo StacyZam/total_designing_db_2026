@@ -100,3 +100,25 @@ CREATE TRIGGER rating_change_trigger
 AFTER INSERT OR UPDATE OR DELETE ON zamaraeva_food.review
 FOR EACH ROW
 EXECUTE FUNCTION zamaraeva_food.rating_change();
+
+-- Запрет смены пароля клиента
+CREATE OR REPLACE FUNCTION zamaraeva_food.protect_client_password()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.password IS DISTINCT FROM OLD.password THEN
+        IF COALESCE(current_setting('app.allow_password_change', true), 'false') <> 'true' THEN
+            RAISE EXCEPTION 'Изменение пароля существующего пользователя запрещено без явного запроса на смену пароля';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_client_password ON zamaraeva_food.client;
+
+CREATE TRIGGER trg_protect_client_password
+BEFORE UPDATE ON zamaraeva_food.client
+FOR EACH ROW
+EXECUTE FUNCTION zamaraeva_food.protect_client_password();
